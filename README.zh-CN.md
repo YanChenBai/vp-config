@@ -165,7 +165,7 @@ vp pack                  # 构建到 dist
 
 ### 发布
 
-版本由 [Changesets](https://github.com/changesets/changesets) 管理：改动后运行 `vp run changeset` 并说明变更。合入 `master` 后 Release 工作流会打开版本 PR，合并后发布到 npm 并创建 GitHub Release。
+版本由 [Changesets](https://github.com/changesets/changesets) 管理：改动后运行 `vp run changeset` 并说明变更。合入 `main` 后 Release 工作流会打开版本 PR，合并后发布到 npm 并创建 GitHub Release。
 
 ### 项目结构
 

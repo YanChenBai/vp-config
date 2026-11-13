@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { UserConfig } from 'vite-plus';
 import { describe, expect, test } from 'vite-plus/test';
@@ -210,13 +211,18 @@ describe('workspace member', () => {
 
 describe('findConfigDirectory', () => {
   test('finds vite.config from a file url frame', () => {
+    /* Build URLs from platform paths, since `file:///C:/...` only resolves to `C:\` on Windows */
+    const root = resolve('/repo');
+    const library = pathToFileURL(join(root, 'node_modules/@byc/vp-config/dist/index.mjs')).href;
+    const config = pathToFileURL(join(root, 'packages/a/vite.config.ts')).href;
+
     const stack = [
       'Error: Find vite config',
-      '    at byc (file:///C:/repo/node_modules/@byc/vp-config/dist/index.mjs:10:5)',
-      '    at file:///C:/repo/packages/a/vite.config.ts:3:16',
+      `    at byc (${library}:10:5)`,
+      `    at ${config}:3:16`,
     ].join('\n');
 
-    expect(findConfigDirectory(stack)).toBe(join('C:/repo/packages/a'));
+    expect(findConfigDirectory(stack)).toBe(join(root, 'packages/a'));
   });
 
   test('finds vite.config from a path frame', () => {

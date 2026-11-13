@@ -165,7 +165,7 @@ vp pack                  # Build to dist
 
 ### Release
 
-Versions are managed by [Changesets](https://github.com/changesets/changesets). After a change, run `vp run changeset` and describe it. Once merged into `master`, the release workflow opens a version PR; merging it publishes to npm and creates a GitHub Release.
+Versions are managed by [Changesets](https://github.com/changesets/changesets). After a change, run `vp run changeset` and describe it. Once merged into `main`, the release workflow opens a version PR; merging it publishes to npm and creates a GitHub Release.
 
 ### Project structure
 

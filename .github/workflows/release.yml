@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [main]
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -38,8 +38,8 @@ jobs:
       # changesets/action only accepts a static title, so add the version afterwards.
       - if: steps.changesets.outputs.pr-number
         run: |
-          git fetch origin changeset-release/master
-          pkg=$(git show origin/changeset-release/master:package.json)
+          git fetch origin changeset-release/main
+          pkg=$(git show origin/changeset-release/main:package.json)
           name=$(jq -r .name <<<"$pkg")
           version=$(jq -r .version <<<"$pkg")
           gh pr edit "$PR" --title "chore(release): $name@$version"
