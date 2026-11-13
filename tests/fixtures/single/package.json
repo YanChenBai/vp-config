@@ -1,0 +1,4 @@
+{
+  "name": "single",
+  "bin": "./dist/cli.mjs"
+}

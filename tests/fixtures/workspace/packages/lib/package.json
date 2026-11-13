@@ -1,0 +1,5 @@
+{
+  "name": "lib",
+  "bin": "./dist/cli.mjs",
+  "exports": "./dist/index.mjs"
+}

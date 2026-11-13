@@ -1,0 +1,232 @@
+import { join } from 'node:path';
+
+import type { UserConfig } from 'vite-plus';
+import { describe, expect, test } from 'vite-plus/test';
+
+import { findConfigDirectory } from '../src/config-dir.ts';
+import { byc, createLint, detectTraits, lintNames } from '../src/index.ts';
+
+const workspace = join(import.meta.dirname, 'fixtures/workspace');
+const single = join(import.meta.dirname, 'fixtures/single');
+
+/* Flat config objects become overrides; the last one setting a rule wins */
+function ruleValue(config: UserConfig, rule: string): unknown {
+  return (config.lint?.overrides ?? []).findLast(override => override.rules?.[rule] !== undefined)
+    ?.rules?.[rule];
+}
+
+function jsPluginNames(config: UserConfig): string[] {
+  return (config.lint?.overrides ?? [])
+    .flatMap(override => override.jsPlugins ?? [])
+    .map(plugin => (typeof plugin === 'string' ? plugin : plugin.name));
+}
+
+describe('detectTraits', () => {
+  test('aggregates react and tailwindcss across workspace members', () => {
+    expect(detectTraits(workspace)).toEqual({ react: true, tailwindcss: true });
+  });
+
+  test('members see the whole workspace', () => {
+    expect(detectTraits(join(workspace, 'packages/lib'))).toEqual({
+      react: true,
+      tailwindcss: true,
+    });
+  });
+
+  test('single package without workspace', () => {
+    expect(detectTraits(single)).toEqual({ react: false, tailwindcss: false });
+  });
+});
+
+describe('createLint', () => {
+  test('names every preset object', () => {
+    const names = createLint({
+      react: true,
+      stylistic: true,
+      typeAware: true,
+      consoleFiles: ['scripts/**'],
+    }).map(item => item.name);
+
+    expect(names).toEqual(Object.values(lintNames));
+  });
+
+  test('skips disabled objects', () => {
+    const names = createLint({
+      react: false,
+      stylistic: false,
+      typeAware: false,
+      consoleFiles: [],
+    }).map(item => item.name);
+
+    expect(names).not.toContain(lintNames.react);
+    expect(names).not.toContain(lintNames.stylistic);
+    expect(names).not.toContain(lintNames.typeAware);
+    expect(names).not.toContain(lintNames.console);
+  });
+});
+
+describe('byc', () => {
+  test('emits preset parts derived from traits', async () => {
+    const config = await byc({}, { cwd: workspace });
+
+    expect(config.fmt?.sortTailwindcss).toBe(true);
+    expect(ruleValue(config, 'react/rules-of-hooks')).toBe('error');
+    expect(config.staged).toEqual({ '*': 'vp check --fix' });
+    expect(config.run?.tasks).toHaveProperty('cformat');
+    expect(config.pack).toBeUndefined();
+  });
+
+  test('builds lint as an oxlint config', async () => {
+    const config = await byc({}, { cwd: single });
+
+    expect(config.lint?.options).toMatchObject({ typeAware: true, typeCheck: true });
+    expect(ruleValue(config, 'eslint/no-debugger')).toBe('warn');
+    expect(ruleValue(config, 'curly')).toBe('error');
+    expect(jsPluginNames(config)).toEqual(['vite-plus']);
+  });
+
+  test('omits react and tailwind when not detected', async () => {
+    const config = await byc({}, { cwd: single });
+
+    expect(config.fmt?.sortTailwindcss).toBeUndefined();
+    expect(ruleValue(config, 'react/rules-of-hooks')).toBeUndefined();
+  });
+
+  test('traits option overrides detection', async () => {
+    const config = await byc({}, { cwd: single, traits: { react: true } });
+
+    expect(ruleValue(config, 'react/rules-of-hooks')).toBe('error');
+  });
+
+  test('user flat config objects apply after the preset', async () => {
+    const config = await byc(
+      {
+        lint: [
+          { rules: { 'no-console': ['warn', { allow: ['info'] }] } },
+          { files: ['src/legacy/**'], rules: { curly: 'off' } },
+        ],
+      },
+      { cwd: single },
+    );
+
+    const last = config.lint?.overrides?.at(-1);
+
+    expect(ruleValue(config, 'no-console')).toEqual(['warn', { allow: ['info'] }]);
+    expect(last?.files).toEqual(['src/legacy/**']);
+  });
+
+  test('composer methods change preset objects by name', async () => {
+    const config = await byc({}, { cwd: single, stylistic: true })
+      .remove(lintNames.stylistic)
+      .override(lintNames.options, { options: { typeCheck: false } })
+      .overrideRules({ curly: 'warn' });
+
+    expect(jsPluginNames(config)).toEqual(['vite-plus']);
+    expect(ruleValue(config, 'stylistic/brace-style')).toBeUndefined();
+    expect(config.lint?.options).toMatchObject({ typeAware: true, typeCheck: false });
+    expect(ruleValue(config, 'curly')).toBe('warn');
+  });
+
+  test('stylistic and typeAware options', async () => {
+    const config = await byc({}, { cwd: single, stylistic: true, typeAware: false });
+
+    expect(jsPluginNames(config)).toEqual(['vite-plus', 'stylistic']);
+    expect(ruleValue(config, 'stylistic/brace-style')).toEqual([
+      'error',
+      '1tbs',
+      { allowSingleLine: false },
+    ]);
+    expect(config.lint?.options).toMatchObject({ typeAware: false, typeCheck: false });
+  });
+
+  test('exclude drops preset parts', async () => {
+    const config = await byc({}, { cwd: single, exclude: ['staged', 'run', 'lint'] });
+
+    expect(config.staged).toBeUndefined();
+    expect(config.run).toBeUndefined();
+    expect(config.lint).toBeUndefined();
+    expect(config.fmt).toBeDefined();
+  });
+
+  test('deep merges fmt and passes pack through', async () => {
+    const config = await byc(
+      { fmt: { printWidth: 120 }, pack: { entry: ['src/cli.ts'] } },
+      { cwd: single },
+    );
+
+    expect(config.fmt).toMatchObject({ printWidth: 120, singleQuote: true });
+    expect(config.pack).toEqual({ entry: ['src/cli.ts'] });
+  });
+
+  test('is callable by Vite+ with ConfigEnv', async () => {
+    const config = await byc(
+      { define: { A: '1' } },
+      { cwd: single },
+    )({
+      command: 'build',
+      mode: 'production',
+    });
+
+    expect(config.define).toEqual({ A: '1' });
+    expect(config.lint).toBeDefined();
+  });
+
+  test('supports function configs', async () => {
+    const config = byc(({ mode }) => ({ define: { MODE: JSON.stringify(mode) } }), {
+      cwd: single,
+    });
+
+    const resolved = await config({ command: 'build', mode: 'production' });
+    const awaited = await config;
+
+    expect(resolved.define).toEqual({ MODE: '"production"' });
+    expect(resolved.lint).toBeDefined();
+    expect(typeof awaited).toBe('function');
+  });
+});
+
+describe('workspace member', () => {
+  const member = join(workspace, 'packages/lib');
+
+  test('only emits run', async () => {
+    const config = await byc({}, { cwd: member });
+
+    expect(config.lint).toBeUndefined();
+    expect(config.fmt).toBeUndefined();
+    expect(config.staged).toBeUndefined();
+    expect(config.run).toBeDefined();
+    expect(config.pack).toBeUndefined();
+  });
+
+  test('throws when lint or fmt is configured', async () => {
+    await expect(byc({ fmt: {} }, { cwd: member })).rejects.toThrow(/`fmt`/);
+    await expect(byc({}, { cwd: member }).remove(lintNames.style)).rejects.toThrow(/`lint`/);
+  });
+
+  test('workspace root keeps lint and fmt', async () => {
+    await expect(byc({ fmt: {} }, { cwd: workspace })).resolves.toHaveProperty('lint');
+  });
+});
+
+describe('findConfigDirectory', () => {
+  test('finds vite.config from a file url frame', () => {
+    const stack = [
+      'Error: Find vite config',
+      '    at byc (file:///C:/repo/node_modules/@byc/vp-config/dist/index.mjs:10:5)',
+      '    at file:///C:/repo/packages/a/vite.config.ts:3:16',
+    ].join('\n');
+
+    expect(findConfigDirectory(stack)).toBe(join('C:/repo/packages/a'));
+  });
+
+  test('finds vite.config from a path frame', () => {
+    const stack = 'Error\n    at Object.<anonymous> (/repo/vite.config.mts:1:1)';
+
+    expect(findConfigDirectory(stack)).toBe('/repo');
+  });
+
+  test('returns undefined without a config frame', () => {
+    expect(findConfigDirectory('Error\n    at foo (/repo/src/a.ts:1:1)')).toBeUndefined();
+    expect(findConfigDirectory(undefined)).toBeUndefined();
+  });
+});
