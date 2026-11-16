@@ -8,6 +8,10 @@ export interface ProjectTraits {
   react: boolean;
   /* Any workspace package depends on tailwindcss */
   tailwindcss: boolean;
+  /* Any workspace package depends on vite-plus */
+  vitePlus: boolean;
+  /* Any workspace package depends on oxlint-tsgolint, the type-aware linter */
+  tsgolint: boolean;
 }
 
 interface PackageJson {
@@ -108,5 +112,7 @@ export function detectTraits(directory: string): ProjectTraits {
   return {
     react: dependencies.has('react'),
     tailwindcss: dependencies.has('tailwindcss'),
+    vitePlus: dependencies.has('vite-plus'),
+    tsgolint: dependencies.has('oxlint-tsgolint'),
   };
 }

@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const configFilePattern = /^vite\.config\.[cm]?[jt]s$/u;
+/* `vite.config` for the root entry, `oxlint.config` / `oxfmt.config` for the subpath entries */
+const configFilePattern = /^(?:vite|oxlint|oxfmt)\.config\.[cm]?[jt]s$/u;
 
 /* Vite bundles configs into `node_modules/.vite-temp/vite.config.ts.timestamp-<hash>.mjs` */
 const bundledConfigPattern = /^(vite\.config\.[cm]?[jt]s)\.timestamp-[\w-]+\.mjs$/u;
@@ -58,7 +59,7 @@ function resolveConfigFile(path: string): string | undefined {
 }
 
 /**
- * Finds the directory of the vite.config calling `byc()` from a stack trace.
+ * Finds the directory of the config file calling `defineConfig()` from a stack trace.
  *
  * cwd is unreliable: `vp lint` in a member loads the root config with the member as cwd.
  */

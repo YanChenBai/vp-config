@@ -1,4 +1,4 @@
-import type { OxfmtConfig } from 'vite-plus/fmt';
+import type { OxfmtConfig } from 'oxfmt';
 
 import type { ProjectTraits } from '../detect.ts';
 

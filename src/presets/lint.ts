@@ -1,6 +1,7 @@
-import { category } from 'oxlint-flat-config/vite-plus';
-import type { CategorySelection, FlatConfigItem } from 'oxlint-flat-config/vite-plus';
-import type { DummyRuleMap } from 'vite-plus/lint';
+import type { DummyRuleMap } from 'oxlint';
+/* Not the `/vite-plus` entries, so standalone Oxlint works without vite-plus installed */
+import { category } from 'oxlint-flat-config';
+import type { CategorySelection, FlatConfigItem } from 'oxlint-flat-config';
 
 import type { ProjectTraits } from '../detect.ts';
 
@@ -197,8 +198,12 @@ export const readabilityRules: Rules = {
   'unicorn/throw-new-error': 'warn',
 };
 
-export const styleRules: Rules = {
+/* Requires `vite-plus` installed in the project */
+export const vitePlusRules: Rules = {
   'vite-plus/prefer-vite-plus-imports': 'error',
+};
+
+export const styleRules: Rules = {
   'typescript/consistent-type-imports': 'error',
   'unicorn/switch-case-braces': 'error',
   'default-case-last': 'allow',
@@ -294,6 +299,7 @@ export const lintNames = {
   typeAware: 'byc/type-aware',
   readability: 'byc/readability',
   style: 'byc/style',
+  vitePlus: 'byc/vite-plus',
   stylistic: 'byc/stylistic',
   console: 'byc/console',
   test: 'byc/test',
@@ -305,7 +311,7 @@ export const lintNames = {
  * so `correctness` is expanded explicitly to keep the default behavior.
  */
 export function createLint(
-  options: LintPresetOptions & Pick<ProjectTraits, 'react'>,
+  options: LintPresetOptions & Pick<ProjectTraits, 'react' | 'vitePlus'>,
 ): FlatConfigItem[] {
   const correctness = category({ correctness: 'warn', plugins: defaultPlugins });
 
@@ -324,10 +330,11 @@ export function createLint(
     },
     options.typeAware && { name: lintNames.typeAware, rules: typeAwareRules },
     { name: lintNames.readability, rules: readabilityRules },
-    {
-      name: lintNames.style,
+    { name: lintNames.style, rules: styleRules },
+    options.vitePlus && {
+      name: lintNames.vitePlus,
       jsPlugins: [{ name: 'vite-plus', specifier: 'vite-plus/oxlint-plugin' }],
-      rules: styleRules,
+      rules: vitePlusRules,
     },
     options.stylistic && {
       name: lintNames.stylistic,

@@ -1,7 +1,7 @@
 import { composer } from '@oxlint-flat-config/composer/vite-plus';
 import type { Composer } from '@oxlint-flat-config/composer/vite-plus';
 import type { UserConfig as FlatUserConfig } from 'oxlint-flat-config/vite-plus';
-import { defineConfig } from 'vite-plus';
+import { defineConfig as defineViteConfig } from 'vite-plus';
 import type { ConfigEnv, UserConfig } from 'vite-plus';
 
 import { findConfigDirectory } from './config-dir.ts';
@@ -31,9 +31,26 @@ export {
   stylisticRules,
   testRules,
   typeAwareRules,
+  vitePlusRules,
 } from './presets/lint.ts';
 
 export { runPreset, stagedPreset } from './presets/project.ts';
+
+export type {
+  CategoryOptions,
+  CategorySelection,
+  ConfigInput,
+  FlatConfigItem,
+  IncludeIgnoreFileOptions,
+} from 'oxlint-flat-config/vite-plus';
+
+export {
+  all,
+  category,
+  globalIgnores,
+  includeIgnoreFile,
+  recommended,
+} from 'oxlint-flat-config/vite-plus';
 
 /* Vite+ config with `lint` written as flat config */
 export type BycUserConfig = FlatUserConfig;
@@ -55,6 +72,8 @@ export interface BycOptions {
   typeAware?: boolean;
   /* Globs where `console` is allowed. Default: `['scripts/**', 'bin/**', 'apps/*-server/**']` */
   consoleFiles?: string[];
+  /* Adds cached tasks (`ccheck`, `cbuild`, ...) to `run.tasks`. Default: false */
+  cachedTasks?: boolean;
   /* Preset parts to leave out */
   exclude?: ConfigPart[];
 }
@@ -84,18 +103,20 @@ function rootPreset(traits: ProjectTraits, options: BycOptions): PresetConfig {
     fmt: createFmt(traits),
     lint: createLint({
       react: traits.react,
+      /* Always installed when this entry runs */
+      vitePlus: true,
       stylistic: options.stylistic ?? false,
       typeAware: options.typeAware ?? true,
       consoleFiles: options.consoleFiles ?? defaultConsoleFiles,
     }),
     staged: stagedPreset,
-    run: runPreset,
+    run: options.cachedTasks ? runPreset : undefined,
   };
 }
 
 /* Vite+ only reads lint and fmt from the workspace root */
-function memberPreset(): PresetConfig {
-  return { run: runPreset };
+function memberPreset(options: BycOptions): PresetConfig {
+  return { run: options.cachedTasks ? runPreset : undefined };
 }
 
 function assertMemberConfig(state: State, user: BycUserConfig): void {
@@ -123,13 +144,13 @@ async function build(state: State, user: BycUserConfig): Promise<UserConfig> {
   }
 
   const preset = member
-    ? memberPreset()
+    ? memberPreset(state.options)
     : rootPreset({ ...detectTraits(state.directory), ...state.options.traits }, state.options);
 
   const { lint, ...merged } = mergePreset(omitParts(preset, state.options.exclude ?? []), user);
 
   if (lint === undefined && state.lintSteps.length === 0) {
-    return defineConfig(merged);
+    return defineViteConfig(merged);
   }
 
   return state.lintSteps.reduce((composed, step) => step(composed), composer({ ...merged, lint }));
@@ -182,8 +203,8 @@ function create<Result>(state: State): BycConfig<Result> {
 /**
  * Vite+ config preset. Parts depend on where the config is:
  *
- * - Single package / workspace root: fmt, lint, staged, run
- * - Workspace member: run
+ * - Single package / workspace root: fmt, lint, staged, run (with `cachedTasks`)
+ * - Workspace member: run (with `cachedTasks`)
  *
  * `lint` is flat config appended after the preset. Preset objects can be changed by name.
  *
@@ -209,3 +230,13 @@ export function byc(
 
   return create<UserConfig>({ config, directory, options, lintSteps: [] });
 }
+
+/**
+ * Same as `byc()`, named after Vite+'s `defineConfig` so migrating only changes the import.
+ *
+ * @example
+ * import { defineConfig } from '@byc/vp-config';
+ *
+ * export default defineConfig({ plugins: [react()] });
+ */
+export const defineConfig: typeof byc = byc;

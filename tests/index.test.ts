@@ -5,7 +5,10 @@ import type { UserConfig } from 'vite-plus';
 import { describe, expect, test } from 'vite-plus/test';
 
 import { findConfigDirectory } from '../src/config-dir.ts';
-import { byc, createLint, detectTraits, lintNames } from '../src/index.ts';
+import { createDefineConfig as createFmtConfig, defineConfig as defineFmt } from '../src/fmt.ts';
+import { byc, createLint, defineConfig, detectTraits, lintNames } from '../src/index.ts';
+import type { defineConfig as defineLint } from '../src/lint.ts';
+import { createDefineConfig as createLintConfig } from '../src/lint.ts';
 
 const workspace = join(import.meta.dirname, 'fixtures/workspace');
 const single = join(import.meta.dirname, 'fixtures/single');
@@ -24,18 +27,30 @@ function jsPluginNames(config: UserConfig): string[] {
 
 describe('detectTraits', () => {
   test('aggregates react and tailwindcss across workspace members', () => {
-    expect(detectTraits(workspace)).toEqual({ react: true, tailwindcss: true });
+    expect(detectTraits(workspace)).toEqual({
+      react: true,
+      tailwindcss: true,
+      vitePlus: false,
+      tsgolint: false,
+    });
   });
 
   test('members see the whole workspace', () => {
     expect(detectTraits(join(workspace, 'packages/lib'))).toEqual({
       react: true,
       tailwindcss: true,
+      vitePlus: false,
+      tsgolint: false,
     });
   });
 
   test('single package without workspace', () => {
-    expect(detectTraits(single)).toEqual({ react: false, tailwindcss: false });
+    expect(detectTraits(single)).toEqual({
+      react: false,
+      tailwindcss: false,
+      vitePlus: false,
+      tsgolint: false,
+    });
   });
 });
 
@@ -43,6 +58,7 @@ describe('createLint', () => {
   test('names every preset object', () => {
     const names = createLint({
       react: true,
+      vitePlus: true,
       stylistic: true,
       typeAware: true,
       consoleFiles: ['scripts/**'],
@@ -54,6 +70,7 @@ describe('createLint', () => {
   test('skips disabled objects', () => {
     const names = createLint({
       react: false,
+      vitePlus: false,
       stylistic: false,
       typeAware: false,
       consoleFiles: [],
@@ -63,6 +80,7 @@ describe('createLint', () => {
     expect(names).not.toContain(lintNames.stylistic);
     expect(names).not.toContain(lintNames.typeAware);
     expect(names).not.toContain(lintNames.console);
+    expect(names).not.toContain(lintNames.vitePlus);
   });
 });
 
@@ -73,8 +91,19 @@ describe('byc', () => {
     expect(config.fmt?.sortTailwindcss).toBe(true);
     expect(ruleValue(config, 'react/rules-of-hooks')).toBe('error');
     expect(config.staged).toEqual({ '*': 'vp check --fix' });
-    expect(config.run?.tasks).toHaveProperty('cformat');
+    expect(config.run).toBeUndefined();
     expect(config.pack).toBeUndefined();
+  });
+
+  test('cachedTasks adds cached tasks to run', async () => {
+    const config = await byc({}, { cwd: workspace, cachedTasks: true });
+
+    expect(config.run?.tasks).toHaveProperty('cformat');
+    expect(config.run?.tasks).toHaveProperty('cbuild');
+  });
+
+  test('defineConfig is byc', () => {
+    expect(defineConfig).toBe(byc);
   });
 
   test('builds lint as an oxlint config', async () => {
@@ -141,7 +170,10 @@ describe('byc', () => {
   });
 
   test('exclude drops preset parts', async () => {
-    const config = await byc({}, { cwd: single, exclude: ['staged', 'run', 'lint'] });
+    const config = await byc(
+      {},
+      { cwd: single, cachedTasks: true, exclude: ['staged', 'run', 'lint'] },
+    );
 
     expect(config.staged).toBeUndefined();
     expect(config.run).toBeUndefined();
@@ -190,13 +222,19 @@ describe('workspace member', () => {
   const member = join(workspace, 'packages/lib');
 
   test('only emits run', async () => {
-    const config = await byc({}, { cwd: member });
+    const config = await byc({}, { cwd: member, cachedTasks: true });
 
     expect(config.lint).toBeUndefined();
     expect(config.fmt).toBeUndefined();
     expect(config.staged).toBeUndefined();
     expect(config.run).toBeDefined();
     expect(config.pack).toBeUndefined();
+  });
+
+  test('emits nothing without cachedTasks', async () => {
+    const config = await byc({}, { cwd: member });
+
+    expect(config.run).toBeUndefined();
   });
 
   test('throws when lint or fmt is configured', async () => {
@@ -209,7 +247,69 @@ describe('workspace member', () => {
   });
 });
 
+describe('@byc/vp-config/fmt', () => {
+  test('merges the preset under the config', () => {
+    const config = createFmtConfig({ cwd: workspace })({ printWidth: 120 });
+
+    expect(config).toMatchObject({ printWidth: 120, singleQuote: true, sortTailwindcss: true });
+  });
+
+  test('defaults to an empty config', () => {
+    expect(defineFmt()).toMatchObject({ singleQuote: true });
+  });
+});
+
+describe('@byc/vp-config/lint', () => {
+  function rule(config: ReturnType<typeof defineLint>, name: string): unknown {
+    return [config, ...(config.overrides ?? [])].findLast(item => item.rules?.[name] !== undefined)
+      ?.rules?.[name];
+  }
+
+  test('returns a plain oxlint config with the preset first', () => {
+    const config = createLintConfig({ cwd: workspace })({ rules: { curly: 'off' } });
+
+    expect(config).not.toHaveProperty('then');
+    expect(config.options).toMatchObject({ typeAware: false, typeCheck: false });
+    expect(rule(config, 'react/rules-of-hooks')).toBe('error');
+    expect(rule(config, 'curly')).toBe('off');
+  });
+
+  test('leaves out the vite-plus plugin when vite-plus is not a dependency', () => {
+    const config = createLintConfig({ cwd: single })();
+
+    expect(config.jsPlugins ?? []).toEqual([]);
+    expect(JSON.stringify(config)).not.toContain('vite-plus');
+    expect(
+      rule(
+        createLintConfig({ cwd: single, traits: { vitePlus: true } })(),
+        'vite-plus/prefer-vite-plus-imports',
+      ),
+    ).toBe('error');
+  });
+
+  test('typeAware follows tsgolint or vite-plus', () => {
+    const withTsgolint = createLintConfig({ cwd: single, traits: { tsgolint: true } })();
+    const withVitePlus = createLintConfig({ cwd: single, traits: { vitePlus: true } })();
+
+    expect(withTsgolint.options).toMatchObject({ typeAware: true, typeCheck: true });
+    expect(withVitePlus.options).toMatchObject({ typeAware: true, typeCheck: true });
+  });
+
+  test('options change the preset', () => {
+    const config = createLintConfig({ cwd: single, typeAware: false, stylistic: true })();
+
+    expect(config.options).toMatchObject({ typeAware: false, typeCheck: false });
+    expect(rule(config, 'stylistic/brace-style')).toBeDefined();
+    expect(rule(config, 'react/rules-of-hooks')).toBeUndefined();
+  });
+});
+
 describe('findConfigDirectory', () => {
+  test('finds oxlint.config and oxfmt.config', () => {
+    expect(findConfigDirectory('Error\n    at /repo/oxlint.config.ts:1:1')).toBe('/repo');
+    expect(findConfigDirectory('Error\n    at /repo/oxfmt.config.mjs:1:1')).toBe('/repo');
+  });
+
   test('finds vite.config from a file url frame', () => {
     /* Build URLs from platform paths, since `file:///C:/...` only resolves to `C:\` on Windows */
     const root = resolve('/repo');
