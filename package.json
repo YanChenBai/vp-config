@@ -1,6 +1,6 @@
 {
   "name": "@byc/vp-config",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "YanChenBai's opinionated Vite+ config preset: fmt, lint, staged and run. Fmt and lint presets also work standalone with Oxfmt and Oxlint.",
   "keywords": [
     "oxfmt",
